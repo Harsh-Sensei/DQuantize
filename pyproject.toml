@@ -1,0 +1,7 @@
+[project]
+name = "dquantize"
+version = "0.1.0"
+description = "Step aware quantization of discrete diffusion LMs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
