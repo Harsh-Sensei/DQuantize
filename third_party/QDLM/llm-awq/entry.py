@@ -182,8 +182,8 @@ print("Quantization config:", q_config)
 
 def build_model_and_enc(model_path, dtype):
     torch_dtype = torch.float16 if dtype == "float16" else torch.bfloat16
-    if not os.path.exists(model_path):  # look into ssd
-        raise FileNotFoundError(f"{model_path} not found!")
+    # if not os.path.exists(model_path):  # look into ssd
+    #     raise FileNotFoundError(f"{model_path} not found!")
     print(f"* Building model {model_path}")
 
     # all hf model
@@ -397,8 +397,6 @@ def main():
     print(results['results'])
 
     # save results
-    import json
-    import os
     if not os.path.exists('results'):
         os.makedirs('results')
     with open(f'results/{args.model_path.split("/")[-1]}-{args.w_bit}w.json', 'a') as f:    

@@ -121,3 +121,5 @@ site/
 experiments/
 notebooks/.ipynb_checkpoints
 
+probs.jsonl
+plots/

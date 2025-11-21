@@ -75,3 +75,10 @@ See `experiment_notes.md` for detailed experiment documentation and results.
 
 [Add contributing guidelines here]
 
+
+## Resources 
+Post training quantization techniques :  
+* SmoothQuant : https://www.youtube.com/watch?v=U0yvqjdMfr0 
+* AWQ : https://www.youtube.com/watch?v=3dYLj9vjfA0 
+* GPTQ : https://www.youtube.com/watch?v=OKpSgL9oMWU
+
