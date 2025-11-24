@@ -130,7 +130,7 @@ def real_quantize_model_weight(model, w_bit, q_config, init_only=False):
     assert q_config["zero_point"], "We only support zero_point quantization now."
 
     layers = get_blocks(model)
-    for i in tqdm(
+    for i in tqdm[int](
         range(len(layers)),
         desc="real weight quantization..." + ("(init only)" if init_only else ""),
     ):

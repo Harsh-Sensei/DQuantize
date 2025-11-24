@@ -60,8 +60,12 @@ uv pip install -e .
 ```
 
 ## Usage
+To get the AWQ quantized model, 
+```bash
+cd third_party/QDLM/scripts
+./llada_awq_generate_model.sh
+```
 
-[Add usage instructions here]
 
 ## Experiments
 

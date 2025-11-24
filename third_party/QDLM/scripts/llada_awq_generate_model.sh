@@ -14,4 +14,4 @@ Q_GROUP_SIZE=128
 
 CUDA_VISIBLE_DEVICES=1 python $DIRPATH/llm-awq/entry.py --model_path $MODEL_PATH \
     --w_bit $W_BIT --q_group_size $Q_GROUP_SIZE \
-    --run_awq --dump_awq $CACHE_PATH/$MODEL_PATH-w$W_BIT-g$Q_GROUP_SIZE.pt
+    --run_awq --dump_awq $CACHE_PATH/$MODEL_PATH-AWQ-w$W_BIT-g$Q_GROUP_SIZE.pt

@@ -4,7 +4,7 @@ export HF_ALLOW_CODE_EVAL=1
 
 DIRPATH="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null 2>&1 && pwd)"
 MODEL_PATH='/path/to/your/model'  # Replace with your model path
-W_BIT=3
+W_BIT=4
 
 # model_path: the path to the pretrained model or instruct-tuned model
 # w_bit: the weight bit-width for AWQ quantization
