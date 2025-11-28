@@ -16,7 +16,7 @@ CUDA_VISIBLE_DEVICES=3,2 uv run -m dquantize.run_llada_quantization_analysis \
     --model "GSAI-ML/LLaDA-8B-Instruct" \
     --quantized_model "/home/scratch/hshah2/dquantize_cache/GSAI-ML/LLaDA-8B-Instruct-w4-g128.pt" \
     --dataset "wikitext2" \
-    --max_examples 8 \
+    --max_examples 128 \
     --min_length 32 \
     --max_length 128 \
     --output_dir "${OUTPUT_DIR}" \

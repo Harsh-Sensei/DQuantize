@@ -111,9 +111,15 @@ def compute_jaccard_similarity(set1, set2):
     return intersection / union
 
 
-def plot_quantization_metrics_per_batch(df, output_dir='plots'):
+def plot_quantization_metrics_per_batch(df, output_dir='plots', mean_gen_length=None, std_gen_length=None):
     """
     Plot KL divergence and Jaccard similarity for each batch separately.
+    
+    Args:
+        df: DataFrame with analysis logs
+        output_dir: Directory to save plots
+        mean_gen_length: Mean generation length (for horizontal line)
+        std_gen_length: Std dev of generation length (for horizontal lines)
     """
     os.makedirs(output_dir, exist_ok=True)
     
@@ -157,6 +163,14 @@ def plot_quantization_metrics_per_batch(df, output_dir='plots'):
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.plot(x_vals, subdf["avg_kl_divergence"], color='red', linewidth=2)
         add_block_markers_and_labels(ax)
+        
+        # Add horizontal lines for generation length statistics
+        if mean_gen_length is not None and std_gen_length is not None:
+            ax.axhline(y=mean_gen_length, color='green', linestyle=':', linewidth=2, alpha=0.7, label=f'Mean Gen Length: {mean_gen_length:.1f}')
+            ax.axhline(y=mean_gen_length + std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5, label=f'Mean ± Std: {mean_gen_length + std_gen_length:.1f}')
+            ax.axhline(y=mean_gen_length - std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5, label=f'Mean ± Std: {mean_gen_length - std_gen_length:.1f}')
+            ax.legend()
+        
         ax.set_title(f"Batch {batch_idx}: KL Divergence (Precise || Quantized)")
         ax.set_ylabel("KL Divergence")
         ax.grid(True, alpha=0.3)
@@ -168,6 +182,14 @@ def plot_quantization_metrics_per_batch(df, output_dir='plots'):
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.plot(x_vals, subdf["jaccard_similarity"], color='blue', linewidth=2)
         add_block_markers_and_labels(ax)
+        
+        # Add horizontal lines for generation length statistics
+        if mean_gen_length is not None and std_gen_length is not None:
+            ax.axhline(y=mean_gen_length, color='green', linestyle=':', linewidth=2, alpha=0.7, label=f'Mean Gen Length: {mean_gen_length:.1f}')
+            ax.axhline(y=mean_gen_length + std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5, label=f'Mean ± Std: {mean_gen_length + std_gen_length:.1f}')
+            ax.axhline(y=mean_gen_length - std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5, label=f'Mean ± Std: {mean_gen_length - std_gen_length:.1f}')
+            ax.legend()
+        
         ax.set_title(f"Batch {batch_idx}: Jaccard Similarity of Selected Tokens")
         ax.set_ylabel("Jaccard Similarity")
         ax.set_ylim([0, 1.05])  # Jaccard is between 0 and 1
@@ -177,9 +199,15 @@ def plot_quantization_metrics_per_batch(df, output_dir='plots'):
         plt.close(fig)
 
 
-def plot_aggregated_quantization_metrics(df, output_dir='plots'):
+def plot_aggregated_quantization_metrics(df, output_dir='plots', mean_gen_length=None, std_gen_length=None):
     """
     Plot aggregated statistics (mean and variance) across all batches for KL divergence and Jaccard similarity.
+    
+    Args:
+        df: DataFrame with analysis logs
+        output_dir: Directory to save plots
+        mean_gen_length: Mean generation length (for horizontal line)
+        std_gen_length: Std dev of generation length (for horizontal lines)
     """
     os.makedirs(output_dir, exist_ok=True)
     
@@ -239,6 +267,13 @@ def plot_aggregated_quantization_metrics(df, output_dir='plots'):
                     mean_vals - std_vals, 
                     mean_vals + std_vals, 
                     alpha=0.3, label='±1 Std Dev', color='red')
+    
+    # Add horizontal lines for generation length statistics
+    if mean_gen_length is not None and std_gen_length is not None:
+        ax.axhline(y=mean_gen_length, color='green', linestyle=':', linewidth=2, alpha=0.7, label=f'Mean Gen Length: {mean_gen_length:.1f}')
+        ax.axhline(y=mean_gen_length + std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5)
+        ax.axhline(y=mean_gen_length - std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5)
+    
     add_block_markers_and_labels(ax)
     ax.set_title("Aggregated: KL Divergence (Precise || Quantized) - Mean ± Std Dev across batches")
     ax.set_ylabel("KL Divergence")
@@ -258,6 +293,13 @@ def plot_aggregated_quantization_metrics(df, output_dir='plots'):
                     mean_vals - std_vals, 
                     mean_vals + std_vals, 
                     alpha=0.3, label='±1 Std Dev', color='blue')
+    
+    # Add horizontal lines for generation length statistics
+    if mean_gen_length is not None and std_gen_length is not None:
+        ax.axhline(y=mean_gen_length, color='green', linestyle=':', linewidth=2, alpha=0.7, label=f'Mean Gen Length: {mean_gen_length:.1f}')
+        ax.axhline(y=mean_gen_length + std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5)
+        ax.axhline(y=mean_gen_length - std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5)
+    
     add_block_markers_and_labels(ax)
     ax.set_title("Aggregated: Jaccard Similarity of Selected Tokens - Mean ± Std Dev across batches")
     ax.set_ylabel("Jaccard Similarity")
@@ -279,6 +321,13 @@ def plot_aggregated_quantization_metrics(df, output_dir='plots'):
                      mean_vals - std_vals, 
                      mean_vals + std_vals, 
                      alpha=0.3, label='±1 Std Dev', color='red')
+    
+    # Add horizontal lines for generation length statistics
+    if mean_gen_length is not None and std_gen_length is not None:
+        ax1.axhline(y=mean_gen_length, color='green', linestyle=':', linewidth=2, alpha=0.7, label=f'Mean Gen Length: {mean_gen_length:.1f}')
+        ax1.axhline(y=mean_gen_length + std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5)
+        ax1.axhline(y=mean_gen_length - std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5)
+    
     for idx in block_starts[1:]:
         ax1.axvline(x=idx, linestyle="--", alpha=0.5, color='gray')
     ax1.set_ylabel("KL Divergence")
@@ -294,6 +343,13 @@ def plot_aggregated_quantization_metrics(df, output_dir='plots'):
                      mean_vals - std_vals, 
                      mean_vals + std_vals, 
                      alpha=0.3, label='±1 Std Dev', color='blue')
+    
+    # Add horizontal lines for generation length statistics
+    if mean_gen_length is not None and std_gen_length is not None:
+        ax2.axhline(y=mean_gen_length, color='green', linestyle=':', linewidth=2, alpha=0.7, label=f'Mean Gen Length: {mean_gen_length:.1f}')
+        ax2.axhline(y=mean_gen_length + std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5)
+        ax2.axhline(y=mean_gen_length - std_gen_length, color='green', linestyle=':', linewidth=1.5, alpha=0.5)
+    
     for idx in block_starts[1:]:
         ax2.axvline(x=idx, linestyle="--", alpha=0.5, color='gray')
     ax2.set_xticks(block_midpoints)
@@ -684,6 +740,19 @@ def generate_with_quantization_analysis(
     # Concatenate all outputs
     x = torch.cat(all_outputs, dim=0)
     
+    # Count generated tokens (excluding masks and EOS) for each sample
+    eos_id = 126081
+    prompt_length = prompt.shape[1]
+    generated_portion = x[:, prompt_length:]  # Shape: (num_samples, gen_length)
+    
+    # Count tokens that are not mask_id and not EOS for each sample
+    is_valid_token = (generated_portion != mask_id) & (generated_portion != eos_id)
+    generation_lengths = is_valid_token.sum(dim=1).cpu().numpy()  # Shape: (num_samples,)
+    
+    # Calculate statistics
+    mean_gen_length = float(np.mean(generation_lengths))
+    std_gen_length = float(np.std(generation_lengths))
+    
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     total_generation_time = time.time() - generation_start
@@ -740,6 +809,12 @@ def generate_with_quantization_analysis(
         avg_jaccard = np.mean(all_jaccard_sims)
         std_jaccard = np.std(all_jaccard_sims)
         print(f"Average Jaccard Similarity: {avg_jaccard:.6f} ± {std_jaccard:.6f}")
+    
+    print(f"\nGeneration Length Statistics:")
+    print(f"  Mean: {mean_gen_length:.2f} tokens")
+    print(f"  Std Dev: {std_gen_length:.2f} tokens")
+    print(f"  Min: {float(np.min(generation_lengths)):.2f} tokens")
+    print(f"  Max: {float(np.max(generation_lengths)):.2f} tokens")
     
     print("="*80)
 
@@ -801,6 +876,13 @@ def generate_with_quantization_analysis(
             "min": float(np.min(all_jaccard_sims)) if len(all_jaccard_sims) > 0 else None,
             "max": float(np.max(all_jaccard_sims)) if len(all_jaccard_sims) > 0 else None,
         },
+        "generation_length": {
+            "mean": mean_gen_length,
+            "std": std_gen_length,
+            "min": float(np.min(generation_lengths)),
+            "max": float(np.max(generation_lengths)),
+            "all_lengths": generation_lengths.tolist()
+        },
         "total_steps_analyzed": len(all_analysis_logs)
     }
     with open(summary_path, "w") as f:
@@ -820,13 +902,13 @@ def generate_with_quantization_analysis(
         
         # Plot per-batch metrics
         print("Generating per-batch plots...")
-        plot_quantization_metrics_per_batch(df_analysis, plots_dir)
+        plot_quantization_metrics_per_batch(df_analysis, plots_dir, mean_gen_length, std_gen_length)
         print(f"Per-batch plots saved to: {plots_dir}")
         
         # Plot aggregated metrics if we have multiple batches
         if df_analysis['batch_idx'].nunique() > 1:
             print("\nGenerating aggregated plots...")
-            plot_aggregated_quantization_metrics(df_analysis, plots_dir)
+            plot_aggregated_quantization_metrics(df_analysis, plots_dir, mean_gen_length, std_gen_length)
             print(f"Aggregated plots saved to: {plots_dir}")
         else:
             print("\nOnly one batch found. Skipping aggregated plots.")
