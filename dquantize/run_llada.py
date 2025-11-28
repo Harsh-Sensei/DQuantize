@@ -10,14 +10,26 @@ from datasets import load_dataset
 from tqdm import tqdm
 import time
 from collections import defaultdict
+from tasks import load_dataset_examples
+from models import load_model
+from utils.postprocess import extract_final_answer_from_output, show_accuracy
+from types import SimpleNamespace
 
 print(torch.cuda.is_available())  # Should return True
 print(torch.cuda.get_device_name(0))  # Should show "NVIDIA L40S"
 print(torch.version.cuda)
 
-
-from transformers import AutoModel, AutoTokenizer
 from torch.profiler import profile, record_function, ProfilerActivity, tensorboard_trace_handler
+
+
+# LLaDA model name -> default model path mapping
+LLADA_MODEL_PATHS = {
+    "llada": "GSAI-ML/LLaDA-8B-Instruct",              # Standard bfloat16 LLaDA
+    # "llada-gptq": "path/to/llada-gptq",            # GPTQ quantized
+    # "llada-awq": "path/to/llada-awq",              # AWQ quantized
+    # "llada-bnb-4bit": "path/to/llada-bnb-4bit",    # bitsandbytes 4-bit quantization
+    # "llada-bnb-8bit": "path/to/llada-bnb-8bit",    # bitsandbytes 8-bit quantization
+}
 
 # Adapted from LLaDA codebase
 def add_gumbel_noise(logits, temperature):
@@ -364,86 +376,17 @@ def generate(model, prompt, attention_mask=None, steps=128, gen_length=128, bloc
 
     return x
 
-def load_dataset_examples(dataset_name, tokenizer, max_examples, max_length, min_length=0):
-    """
-    Load examples from a dataset.
-    
-    Args:
-        dataset_name: 'toy' or 'wikitext2'
-        tokenizer: Tokenizer to use
-        max_examples: Maximum number of examples to load
-        max_length: Maximum length of each example (0 for no limit)
-        min_length: Minimum length of each example in tokens (0 for no limit)
-    """
-    if dataset_name == 'toy':
-        # Create toy dataset with simple prompts
-        prompts = [
-            "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours?",
-            "Joy can read 8 pages of a book in 20 minutes. How many hours will it take her to read 120 pages?",
-            "Randy has 60 mango trees on his farm. He also has 5 less than half as many coconut trees as mango trees. How many trees does Randy have in all on his farm?"
-        ]
-        # Filter by min_length if specified
-        if min_length > 0:
-            filtered_prompts = []
-            for prompt in prompts:
-                tokens = tokenizer.encode(prompt, add_special_tokens=False)
-                if len(tokens) >= min_length:
-                    # Truncate if max_length is specified
-                    if max_length > 0 and len(tokens) > max_length:
-                        tokens = tokens[:max_length]
-                        prompt = tokenizer.decode(tokens, skip_special_tokens=True)
-                    filtered_prompts.append(prompt)
-            prompts = filtered_prompts
-        
-        # Repeat or truncate to max_examples
-        prompts = prompts[:max_examples]
-        return prompts
-    elif dataset_name == 'wikitext2':
-        # Load wikitext2 from huggingface
-        print("Loading wikitext2 dataset...")
-        dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='train')
-        texts = []
-        # Try to get dataset length, but handle cases where it might not be available
-        try:
-            dataset_len = len(dataset)
-            total = min(max_examples * 2, dataset_len)
-        except (TypeError, AttributeError):
-            total = max_examples * 2
-        
-        pbar = tqdm(enumerate(dataset), desc="Loading examples", total=total if total > 0 else None)
-        for i, example in pbar:
-            if len(texts) >= max_examples:
-                break
-            text = example['text'].strip()
-            if len(text) > 0:  # Skip empty texts
-                # Check token length for filtering
-                tokens = tokenizer.encode(text, add_special_tokens=False)
-                
-                # Filter by min_length if specified
-                if min_length > 0 and len(tokens) < min_length:
-                    continue
-                
-                # Truncate by token length if max_length is specified
-                if max_length > 0 and len(tokens) > max_length:
-                    tokens = tokens[:max_length]
-                    text = tokenizer.decode(tokens, skip_special_tokens=True)
-                
-                texts.append(text)
-                pbar.set_postfix({"loaded": len(texts), "target": max_examples})
-        pbar.close()
-        return texts[:max_examples]
-    else:
-        raise ValueError(f"Unknown dataset: {dataset_name}. Must be 'toy' or 'wikitext2'")
 
 def main():
     parser = argparse.ArgumentParser(description='Run LLaDA generation')
     
     # Model arguments
-    parser.add_argument('--model', type=str, default='GSAI-ML/LLaDA-8B-Instruct',
-                        help='Model name or path to load from HuggingFace')
+    # parser.add_argument('--model', type=str, default='GSAI-ML/LLaDA-8B-Instruct',
+    #                     help='Model name or path to load from HuggingFace')
+    parser.add_argument('--name', type=str, default='llada', help="Model name")
     
     # Dataset arguments
-    parser.add_argument('--dataset', type=str, choices=['toy', 'wikitext2'], default='toy',
+    parser.add_argument('--dataset', type=str, choices=['toy', 'wikitext2', 'gsm8k'], default='toy',
                         help='Dataset to load: "toy" or "wikitext2"')
     parser.add_argument('--max_examples', type=int, default=3,
                         help='Maximum number of examples to process')
@@ -481,6 +424,8 @@ def main():
                         help='Number of samples to process in each batch (default: 8)')
     
     args = parser.parse_args()
+
+    device = 'cuda'
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
@@ -492,49 +437,48 @@ def main():
         os.makedirs(profile_dir, exist_ok=True)
     
     # Save configuration
-    config = {
-        'model': args.model,
-        'dataset': args.dataset,
-        'max_examples': args.max_examples,
-        'max_length': args.max_length,
-        'min_length': args.min_length,
-        'steps': args.steps,
-        'gen_length': args.gen_length,
-        'block_length': args.block_length,
-        'temperature': args.temperature,
-        'cfg_scale': args.cfg_scale,
-        'remasking': args.remasking,
-        'logits_eos_inf': args.logits_eos_inf,
-        'confidence_eos_eot_inf': args.confidence_eos_eot_inf,
-        'profile': args.profile,
-        'batch_size': args.batch_size,
-    }
+    config = config = SimpleNamespace(
+        name=args.name,
+        path=LLADA_MODEL_PATHS[args.name],
+        dataset=args.dataset,
+        max_examples=args.max_examples,
+        max_length=args.max_length,
+        min_length=args.min_length,
+        steps=args.steps,
+        gen_length=args.gen_length,
+        block_length=args.block_length,
+        temperature=args.temperature,
+        cfg_scale=args.cfg_scale,
+        remasking=args.remasking,
+        logits_eos_inf=args.logits_eos_inf,
+        confidence_eos_eot_inf=args.confidence_eos_eot_inf,
+        profile=args.profile,
+        batch_size=args.batch_size,
+        torch_dtype = 'bfloat16', # change it if required
+        trust_remote_code = True, # change to True if loading custom models
+        device = device,
+    )
     
     config_path = os.path.join(args.output_dir, 'call_config.yaml')
     with open(config_path, 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
     
-    device = 'cuda'
+    
 
-    print(f"Loading model: {args.model}")
-    model = AutoModel.from_pretrained(args.model, trust_remote_code=True, torch_dtype=torch.bfloat16).to(device).eval()
-    print("Loading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
-
-    # The LLaDA architecture theoretically supports both left-padding and right-padding. 
-    # However, the sampling code implementation is simpler with left-padding.
-    if tokenizer.padding_side != 'left':
-        tokenizer.padding_side = 'left'
-
-    # If the padding ID equals the mask ID, you need to modify our generate function to achieve correct inference.
-    assert tokenizer.pad_token_id != 126336
+    print(f"Loading model: {config.name}")
+    model_cls = load_model(config)
+    model = model_cls._model
+    tokenizer = model_cls._tokenizer
 
     # Load dataset
     print(f"Loading dataset: {args.dataset}")
-    raw_prompts = load_dataset_examples(args.dataset, tokenizer, args.max_examples, args.max_length, args.min_length)
+    data = load_dataset_examples(args.dataset, tokenizer, args.max_examples, args.max_length, args.min_length)
+    raw_prompts = [d['question'] for d in data]
+    targets = [d['target'] for d in data]
+
     # For instruct models, apply chat template
     print("Preparing prompts...")
-    if 'instruct' in args.model.lower():
+    if 'instruct' in LLADA_MODEL_PATHS[args.name].lower():
         messages = [{"role": "user", "content": prompt} for prompt in raw_prompts]
         prompts = [tokenizer.apply_chat_template([message], add_generation_prompt=True, tokenize=False) for message in messages]
     else:
@@ -572,13 +516,20 @@ def main():
     
     print("\nGeneration complete! Decoding outputs...")
     output = tokenizer.batch_decode(out[:, input_ids.shape[1]:], skip_special_tokens=True)
-    print("\nGenerated outputs:")
-    for i, o in enumerate(output):
-        print(f"\nExample {i + 1}:")
-        print(o)
-        print('-' * 50)
-    print(f"\nResults saved to: {args.output_dir}")
-    
+    # print("\nGenerated outputs:")
+    # for i, o in enumerate(output):
+    #     print(f"\nExample {i + 1}:")
+    #     print(o)
+    #     print('-' * 50)
+    # print(f"\nResults saved to: {args.output_dir}")
+
+
+    # Eval logic (for GSM8k)
+    final_outputs = [extract_final_answer_from_output(o) for o in output]
+    # Exact Match
+    show_accuracy(final_outputs, targets) 
+
+
     if args.profile:
         print(f"\nTo view profiling results in TensorBoard, run:")
         print(f"  tensorboard --logdir={profile_dir}")
