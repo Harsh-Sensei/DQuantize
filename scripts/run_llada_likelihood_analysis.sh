@@ -16,10 +16,11 @@ CUDA_VISIBLE_DEVICES=3,2 uv run -m dquantize.run_llada_likelihood_analysis \
     --model "GSAI-ML/LLaDA-8B-Instruct" \
     --quantized_model "/home/scratch/hshah2/dquantize_cache/GSAI-ML/LLaDA-8B-Instruct-w4-g128.pt" \
     --dataset "wikitext2" \
-    --max_examples 128 \
+    --max_examples 8 \
     --min_length 32 \
     --max_length 128 \
     --output_dir "${OUTPUT_DIR}" \
+    --q_backend "fake" \
     --steps 32 \
     --gen_length 128 \
     --block_length 32 \

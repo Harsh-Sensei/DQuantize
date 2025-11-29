@@ -14,6 +14,7 @@ from scipy.spatial.distance import jensenshannon
 from scipy.stats import entropy
 import pandas as pd
 import matplotlib.pyplot as plt
+from typing import Tuple
 
 # Import apply_awq from the AWQ quantization module
 import sys
@@ -21,6 +22,8 @@ awq_path = os.path.join(os.path.dirname(__file__), '..', 'third_party', 'QDLM', 
 if awq_path not in sys.path:
     sys.path.insert(0, awq_path)
 from awq.quantize.pre_quant import apply_awq
+from awq.quantize.quantizer import real_quantize_model_weight, pseudo_quantize_model_weight
+import re
 
 print(torch.cuda.is_available())  # Should return True
 print(torch.cuda.get_device_name(0))  # Should show "NVIDIA L40S"
@@ -43,6 +46,55 @@ def add_gumbel_noise(logits, temperature):
     noise = torch.rand_like(logits, dtype=torch.float64)
     gumbel_noise = (- torch.log(noise)) ** temperature
     return logits.exp() / gumbel_noise
+
+
+def infer_quantization_params_from_filename(filename: str) -> Tuple[int, int]:
+    """
+    Infer w_bit and q_group_size from AWQ metadata filename.
+    
+    Expected filename patterns:
+    - "*-w4-g128.pt" -> w_bit=4, q_group_size=128
+    - "*-w3-g128.pt" -> w_bit=3, q_group_size=128
+    - "*-w4-g64.pt" -> w_bit=4, q_group_size=64
+    
+    Args:
+        filename: Path to AWQ metadata file
+        
+    Returns:
+        Tuple of (w_bit, q_group_size)
+        
+    Raises:
+        ValueError: If cannot infer parameters from filename
+    """
+    basename = os.path.basename(filename)
+    
+    # Try pattern: -w4-g128 or -w4g128
+    pattern1 = r'-w(\d+)-g(\d+)'
+    match = re.search(pattern1, basename)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    
+    # Try pattern: -w4g128 (no dash between w and g)
+    pattern2 = r'-w(\d+)g(\d+)'
+    match = re.search(pattern2, basename)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    
+    # Try pattern: w4-g128 or w4g128 (no leading dash)
+    pattern3 = r'w(\d+)-g(\d+)'
+    match = re.search(pattern3, basename)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    
+    pattern4 = r'w(\d+)g(\d+)'
+    match = re.search(pattern4, basename)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    
+    raise ValueError(
+        f"Cannot infer w_bit and q_group_size from filename: {filename}. "
+        f"Expected pattern like '*-w4-g128.pt' or '*-w4g128.pt'"
+    )
 
 
 def get_num_transfer_tokens(mask_index, steps):
@@ -998,6 +1050,8 @@ def main():
                         help='Precise model name or path to load from HuggingFace')
     parser.add_argument('--quantized_model', type=str, required=True,
                         help='Path to AWQ metadata file (.pt) for quantized model')
+    parser.add_argument('--q_backend', type=str, default='real', choices=['real', 'fake'],
+                        help='Quantization backend: "real" for actual quantization, "fake" for calibration only')
     
     # Dataset arguments
     parser.add_argument('--dataset', type=str, choices=['toy', 'wikitext2'], default='toy',
@@ -1070,6 +1124,7 @@ def main():
         'confidence_eos_eot_inf': args.confidence_eos_eot_inf,
         'profile': args.profile,
         'batch_size': args.batch_size,
+        'q_backend': args.q_backend,
     }
     
     config_path = os.path.join(args.output_dir, 'call_config.yaml')
@@ -1096,12 +1151,55 @@ def main():
     quantized_model = AutoModel.from_pretrained(args.model, trust_remote_code=True, torch_dtype=torch.bfloat16).to(device_quantized).eval()
     
     # Load and apply AWQ metadata
+    # NOTE: apply_awq modifies the model by applying activation scaling and clipping.
+    # This changes the model's behavior even without weight quantization (q_backend='fake').
+    # The scaling factors are applied to layer norms, activations (GELU, SiLU), and linear layers
+    # to prepare the model for quantization. This is why outputs may differ from the precise model
+    # even when weight quantization is not applied.
     print(f"Loading AWQ metadata from: {args.quantized_model}")
     if not os.path.exists(args.quantized_model):
         raise FileNotFoundError(f"AWQ metadata file not found: {args.quantized_model}")
     
     awq_results = torch.load(args.quantized_model, map_location='cpu')
     apply_awq(quantized_model, awq_results)
+    
+    # Infer w_bit and q_group_size from filename (needed for both real and fake quantization)
+    try:
+        w_bit, q_group_size = infer_quantization_params_from_filename(args.quantized_model)
+        print(f"Inferred quantization parameters: w_bit={w_bit}, q_group_size={q_group_size}")
+    except ValueError as e:
+        raise ValueError(
+            f"Failed to infer quantization parameters from filename: {e}. "
+            f"Please ensure the filename follows the pattern '*-w4-g128.pt' or '*-w4g128.pt'"
+        )
+    
+    # Create quantization config
+    q_config = {
+        "zero_point": True,  # AWQ uses zero_point by default
+        "q_group_size": q_group_size,
+    }
+    
+    # Apply weight quantization based on q_backend
+    if args.q_backend == 'real':
+        print("Applying real weight quantization...")
+        # Apply real quantization
+        real_quantize_model_weight(
+            quantized_model, 
+            w_bit=w_bit, 
+            q_config=q_config
+        )
+        print(f"Applied real weight quantization (w_bit={w_bit}, q_group_size={q_group_size})")
+    elif args.q_backend == 'fake':
+        print("Applying pseudo weight quantization...")
+        # Apply pseudo quantization
+        pseudo_quantize_model_weight(
+            quantized_model,
+            w_bit=w_bit,
+            q_config=q_config
+        )
+        print(f"Applied pseudo weight quantization (w_bit={w_bit}, q_group_size={q_group_size})")
+    else:
+        raise ValueError(f"Invalid q_backend: {args.q_backend}. Must be 'real' or 'fake'")
     
     # After applying AWQ, ensure all model parameters are on the correct device
     # (apply_scale moves modules to CPU during processing, so we need to move them back)
@@ -1116,7 +1214,7 @@ def main():
         if buffer.device != torch.device(device_quantized):
             buffer.data = buffer.data.to(device_quantized)
     
-    print(f"Applied AWQ quantization to model on {device_quantized}")
+    print(f"Quantization complete. Model on {device_quantized}")
     
     print("Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)

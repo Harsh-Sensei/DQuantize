@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 from dataclasses import dataclass
-from typing import List, Callable, Optional
+from typing import List, Callable, Optional, Tuple
 from transformers import AutoModel, AutoTokenizer
 from tqdm import tqdm
 import os
@@ -13,12 +13,24 @@ awq_path = os.path.join(os.path.dirname(__file__), '..', 'third_party', 'QDLM', 
 if awq_path not in sys.path:
     sys.path.insert(0, awq_path)
 from awq.quantize.pre_quant import apply_awq
-
+from awq.quantize.quantizer import real_quantize_model_weight, pseudo_quantize_model_weight
+import re
+import time
 
 @dataclass
 class DQuantizeConfig:
-    """Configuration for dynamic quantization strategies."""
+    """Configuration for dynamic quantization strategies and generation parameters."""
     k: int = 64  # Number of steps for 'firstk' and 'lastk' strategies
+    steps: int = 128  # Sampling steps per block
+    gen_length: int = 128  # Total generation length
+    block_length: int = 128  # Length of each generation block
+    temperature: float = 0.  # Sampling temperature
+    cfg_scale: float = 0.  # Classifier-free guidance scale
+    logits_eos_inf: bool = False  # Set EOS logits to -inf
+    confidence_eos_eot_inf: bool = False  # Set EOS/EoT confidence to -inf
+    batch_size: int = 8  # Maximum batch size for processing
+    apply_chat_template: bool = True  # Apply chat template for instruct models
+    mask_id: int = 126336  # Token ID for mask token
 
 
 def add_gumbel_noise(logits, temperature):
@@ -32,6 +44,55 @@ def add_gumbel_noise(logits, temperature):
     noise = torch.rand_like(logits, dtype=torch.float64)
     gumbel_noise = (- torch.log(noise)) ** temperature
     return logits.exp() / gumbel_noise
+
+
+def infer_quantization_params_from_filename(filename: str) -> Tuple[int, int]:
+    """
+    Infer w_bit and q_group_size from AWQ metadata filename.
+    
+    Expected filename patterns:
+    - "*-w4-g128.pt" -> w_bit=4, q_group_size=128
+    - "*-w3-g128.pt" -> w_bit=3, q_group_size=128
+    - "*-w4-g64.pt" -> w_bit=4, q_group_size=64
+    
+    Args:
+        filename: Path to AWQ metadata file
+        
+    Returns:
+        Tuple of (w_bit, q_group_size)
+        
+    Raises:
+        ValueError: If cannot infer parameters from filename
+    """
+    basename = os.path.basename(filename)
+    
+    # Try pattern: -w4-g128 or -w4g128
+    pattern1 = r'-w(\d+)-g(\d+)'
+    match = re.search(pattern1, basename)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    
+    # Try pattern: -w4g128 (no dash between w and g)
+    pattern2 = r'-w(\d+)g(\d+)'
+    match = re.search(pattern2, basename)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    
+    # Try pattern: w4-g128 or w4g128 (no leading dash)
+    pattern3 = r'w(\d+)-g(\d+)'
+    match = re.search(pattern3, basename)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    
+    pattern4 = r'w(\d+)g(\d+)'
+    match = re.search(pattern4, basename)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    
+    raise ValueError(
+        f"Cannot infer w_bit and q_group_size from filename: {filename}. "
+        f"Expected pattern like '*-w4-g128.pt' or '*-w4g128.pt'"
+    )
 
 
 def get_num_transfer_tokens(mask_index, steps):
@@ -71,7 +132,8 @@ class DQuantizeModelLLada:
         dquantize_config: Optional[DQuantizeConfig] = None,
         device_precise: str = 'cuda:0',
         device_quantized: str = 'cuda:1',
-        torch_dtype = torch.bfloat16
+        torch_dtype = torch.bfloat16,
+        q_backend: str = 'real'
     ):
         """
         Initialize the DQuantizeModelLLada.
@@ -84,10 +146,14 @@ class DQuantizeModelLLada:
             device_precise: Device for precise model (default: 'cuda:0')
             device_quantized: Device for quantized model (default: 'cuda:1')
             torch_dtype: Data type for models (default: torch.bfloat16)
+            q_backend: Quantization backend ('real' or 'fake', default: 'real')
         """
         # Validate inputs
         if strategy not in ['all', 'firstk', 'lastk']:
             raise ValueError(f"Invalid strategy: {strategy}. Must be 'all', 'firstk', or 'lastk'")
+        
+        if q_backend not in ['real', 'fake']:
+            raise ValueError(f"Invalid q_backend: {q_backend}. Must be 'real' or 'fake'")
         
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available. This class requires GPU support.")
@@ -102,6 +168,7 @@ class DQuantizeModelLLada:
         self.device_precise = device_precise
         self.device_quantized = device_quantized
         self.torch_dtype = torch_dtype
+        self.q_backend = q_backend
         
         # Load models
         print(f"Loading precise model on {device_precise}: {model_name}")
@@ -119,12 +186,55 @@ class DQuantizeModelLLada:
         ).to(device_quantized).eval()
         
         # Apply AWQ quantization
+        # NOTE: apply_awq modifies the model by applying activation scaling and clipping.
+        # This changes the model's behavior even without weight quantization (q_backend='fake').
+        # The scaling factors are applied to layer norms, activations (GELU, SiLU), and linear layers
+        # to prepare the model for quantization. This is why outputs may differ from the precise model
+        # even when weight quantization is not applied.
         print(f"Loading AWQ metadata from: {quantized_model_path}")
         if not os.path.exists(quantized_model_path):
             raise FileNotFoundError(f"AWQ metadata file not found: {quantized_model_path}")
         
         awq_results = torch.load(quantized_model_path, map_location='cpu')
         apply_awq(self.quantized_model, awq_results)
+        
+        # Infer w_bit and q_group_size from filename (needed for both real and fake quantization)
+        try:
+            w_bit, q_group_size = infer_quantization_params_from_filename(quantized_model_path)
+            print(f"Inferred quantization parameters: w_bit={w_bit}, q_group_size={q_group_size}")
+        except ValueError as e:
+            raise ValueError(
+                f"Failed to infer quantization parameters from filename: {e}. "
+                f"Please ensure the filename follows the pattern '*-w4-g128.pt' or '*-w4g128.pt'"
+            )
+        
+        # Create quantization config
+        q_config = {
+            "zero_point": True,  # AWQ uses zero_point by default
+            "q_group_size": q_group_size,
+        }
+        
+        # Apply weight quantization based on q_backend
+        if self.q_backend == 'real':
+            print("Applying real weight quantization...")
+            # Apply real quantization
+            real_quantize_model_weight(
+                self.quantized_model, 
+                w_bit=w_bit, 
+                q_config=q_config
+            )
+            print(f"Applied real weight quantization (w_bit={w_bit}, q_group_size={q_group_size})")
+        elif self.q_backend == 'fake':
+            print("Applying pseudo weight quantization...")
+            # Apply pseudo quantization
+            pseudo_quantize_model_weight(
+                self.quantized_model,
+                w_bit=w_bit,
+                q_config=q_config
+            )
+            print(f"Applied pseudo weight quantization (w_bit={w_bit}, q_group_size={q_group_size})")
+        else:
+            raise ValueError(f"Invalid q_backend: {self.q_backend}. Must be 'real' or 'fake'")
         
         # Ensure quantized model is on correct device
         print(f"Moving quantized model to {device_quantized}...")
@@ -137,7 +247,7 @@ class DQuantizeModelLLada:
             if buffer.device != torch.device(device_quantized):
                 buffer.data = buffer.data.to(device_quantized)
         
-        print(f"Applied AWQ quantization to model on {device_quantized}")
+        print(f"Quantization complete. Model on {device_quantized}")
         
         # Load tokenizer
         print("Loading tokenizer...")
@@ -189,14 +299,6 @@ class DQuantizeModelLLada:
         self,
         prompt: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        steps: int = 128,
-        gen_length: int = 128,
-        block_length: int = 128,
-        temperature: float = 0.,
-        cfg_scale: float = 0.,
-        mask_id: int = 126336,
-        logits_eos_inf: bool = False,
-        confidence_eos_eot_inf: bool = False,
     ) -> torch.Tensor:
         """
         Generate tokens for a single batch using dynamic quantization.
@@ -204,18 +306,19 @@ class DQuantizeModelLLada:
         Args:
             prompt: Input token IDs of shape (batch_size, L)
             attention_mask: Optional attention mask
-            steps: Sampling steps per block
-            gen_length: Total generation length
-            block_length: Length of each generation block
-            temperature: Sampling temperature
-            cfg_scale: Classifier-free guidance scale
-            mask_id: Token ID for mask token (default: 126336)
-            logits_eos_inf: Set EOS logits to -inf
-            confidence_eos_eot_inf: Set EOS/EoT confidence to -inf
         
         Returns:
             Generated token IDs of shape (batch_size, L + gen_length)
         """
+        # Get parameters from config
+        steps = self.dquantize_config.steps
+        gen_length = self.dquantize_config.gen_length
+        block_length = self.dquantize_config.block_length
+        temperature = self.dquantize_config.temperature
+        cfg_scale = self.dquantize_config.cfg_scale
+        mask_id = self.dquantize_config.mask_id
+        logits_eos_inf = self.dquantize_config.logits_eos_inf
+        confidence_eos_eot_inf = self.dquantize_config.confidence_eos_eot_inf
         # Initialize output with masks
         x = torch.full(
             (prompt.shape[0], prompt.shape[1] + gen_length), 
@@ -241,9 +344,6 @@ class DQuantizeModelLLada:
         assert steps % num_blocks == 0
         steps_per_block = steps // num_blocks
         
-        # Calculate total steps for selection function
-        total_steps = num_blocks * steps_per_block
-        global_step = 0
         
         # Generate block by block
         for num_block in tqdm(range(num_blocks), desc="Generating blocks"):
@@ -253,9 +353,10 @@ class DQuantizeModelLLada:
             block_mask_index = (x[:, block_start:block_end] == mask_id)
             num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block)
             
-            for step_idx in range(steps_per_block):
+            for step_idx in tqdm(range(steps_per_block), desc="Generating steps"):
                 # Determine which model to use
-                use_quantized = self.selection_fn(global_step, total_steps)
+                start_pre_model_time = time.time()
+                use_quantized = self.selection_fn(step_idx, steps_per_block)
                 model = self.quantized_model if use_quantized else self.precise_model
                 model_device = self.device_quantized if use_quantized else self.device_precise
                 
@@ -266,7 +367,8 @@ class DQuantizeModelLLada:
                 
                 # Model inference
                 mask_index = (x_input == mask_id)
-                
+                print(f"Time taken for pre-model operations: {time.time() - start_pre_model_time} seconds")
+                start_model_inference_time = time.time()
                 if cfg_scale > 0.:
                     un_x = x_input.clone()
                     un_x[prompt_index_input] = mask_id
@@ -282,7 +384,8 @@ class DQuantizeModelLLada:
                     logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
                 else:
                     logits = model(x_input, attention_mask=attention_mask_input).logits
-                
+                print(f"Time taken for model inference: {time.time() - start_model_inference_time} seconds")
+                start_sampling_time = time.time()
                 if logits_eos_inf:
                     logits[:, :, 126081] = -torch.inf
                 
@@ -317,42 +420,26 @@ class DQuantizeModelLLada:
                 # Move results back to precise device and update x
                 x_input[transfer_index] = x0[transfer_index]
                 x = x_input.to(self.device_precise)
-                
-                global_step += 1
-        
+                print(f"Time taken for sampling: {time.time() - start_sampling_time} seconds")
         return x
     
     def generate(
         self,
         prompts: List[str],
-        steps: int = 128,
-        gen_length: int = 128,
-        block_length: int = 128,
-        temperature: float = 0.,
-        cfg_scale: float = 0.,
-        logits_eos_inf: bool = False,
-        confidence_eos_eot_inf: bool = False,
-        batch_size: int = 8,
-        apply_chat_template: bool = True,
     ) -> List[str]:
         """
         Generate text completions for a batch of prompts.
         
         Args:
             prompts: List of input text prompts
-            steps: Sampling steps per block
-            gen_length: Total generation length
-            block_length: Length of each generation block
-            temperature: Sampling temperature
-            cfg_scale: Classifier-free guidance scale
-            logits_eos_inf: Set EOS logits to -inf
-            confidence_eos_eot_inf: Set EOS/EoT confidence to -inf
-            batch_size: Maximum batch size for processing
-            apply_chat_template: Apply chat template for instruct models
         
         Returns:
             List of generated text completions
         """
+        # Get parameters from config
+        batch_size = self.dquantize_config.batch_size
+        apply_chat_template = self.dquantize_config.apply_chat_template
+        
         # Apply chat template if needed
         if apply_chat_template and 'instruct' in self.model_name.lower():
             messages = [{"role": "user", "content": prompt} for prompt in prompts]
@@ -390,13 +477,6 @@ class DQuantizeModelLLada:
             output_ids = self._generate_batch(
                 prompt=input_ids,
                 attention_mask=attention_mask,
-                steps=steps,
-                gen_length=gen_length,
-                block_length=block_length,
-                temperature=temperature,
-                cfg_scale=cfg_scale,
-                logits_eos_inf=logits_eos_inf,
-                confidence_eos_eot_inf=confidence_eos_eot_inf,
             )
             
             # Extract generated portion (remove prompt)
@@ -427,7 +507,14 @@ def main():
     ]
     
     # Initialize with 'firstk' strategy
-    config = DQuantizeConfig(k=64)
+    config = DQuantizeConfig(
+        k=64,
+        steps=128,
+        gen_length=128,
+        block_length=32,
+        temperature=0.,
+        batch_size=2,
+    )
     dq_model = DQuantizeModelLLada(
         model_name=model_name,
         quantized_model_path=quantized_model_path,
@@ -436,14 +523,7 @@ def main():
     )
     
     # Generate
-    outputs = dq_model.generate(
-        prompts=prompts,
-        steps=128,
-        gen_length=128,
-        block_length=32,
-        temperature=0.,
-        batch_size=2,
-    )
+    outputs = dq_model.generate(prompts=prompts)
     
     # Print results
     for i, (prompt, output) in enumerate(zip(prompts, outputs)):

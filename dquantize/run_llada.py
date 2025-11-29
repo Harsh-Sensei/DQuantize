@@ -1,3 +1,5 @@
+import sys
+sys.path.append("./dquantize")
 import torch
 import json
 import numpy as np
@@ -268,6 +270,7 @@ def generate(model, prompt, attention_mask=None, steps=128, gen_length=128, bloc
     batch_pbar = tqdm(range(num_batches), desc="Processing batches", position=0, leave=True)
     
     for batch_idx in batch_pbar:
+        print(f"Batch {batch_idx + 1}/{num_batches}")
         batch_pbar.set_description(f"Batch {batch_idx + 1}/{num_batches}")
         
         start_idx = batch_idx * batch_size
@@ -516,12 +519,12 @@ def main():
     
     print("\nGeneration complete! Decoding outputs...")
     output = tokenizer.batch_decode(out[:, input_ids.shape[1]:], skip_special_tokens=True)
-    # print("\nGenerated outputs:")
-    # for i, o in enumerate(output):
-    #     print(f"\nExample {i + 1}:")
-    #     print(o)
-    #     print('-' * 50)
-    # print(f"\nResults saved to: {args.output_dir}")
+    print("\nGenerated outputs:")
+    for i, o in enumerate(output):
+        print(f"\nExample {i + 1}:")
+        print(o)
+        print('-' * 50)
+    print(f"\nResults saved to: {args.output_dir}")
 
 
     # Eval logic (for GSM8k)
