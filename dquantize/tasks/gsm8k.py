@@ -15,7 +15,7 @@ class GSM8kDatasetLoader(BaseDatasetLoader):
     """
         
     def __init__(self, tokenizer, max_examples: int, max_length: int, min_length: int = 0,
-                 split: str = 'train', include_answer: bool = False):
+                 split: str = 'test', include_answer: bool = False):
         """
         Args:
             tokenizer: Tokenizer to use
