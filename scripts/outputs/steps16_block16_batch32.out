@@ -1,0 +1,50 @@
+Thu Dec 11 21:19:07 2025       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 575.51.03              Driver Version: 575.51.03      CUDA Version: 12.9     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA RTX A6000               On  |   00000000:41:00.0 Off |                  Off |
+| 30%   39C    P8             26W /  300W |       1MiB /  49140MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+True
+NVIDIA RTX A6000
+12.1
+Loading model: llada
+Loading LLaDA model: GSAI-ML/LLaDA-8B-Instruct
+Loading tokenizer...
+Loading dataset: gsm8k
+Loading GSM8K dataset (test split)...
+Preparing prompts...
+Tokenizing prompts...
+Starting generation (steps=16, gen_length=128, block_length=16)...
+
+================================================================================
+TIMING BREAKDOWN
+================================================================================
+Total generation time: 114.6132s
+
+Detailed breakdown:
+  Initialization:      0.0318s ( 0.03%)
+  Block setup:         0.0797s ( 0.07%)
+  Model inference:   113.0380s (98.63%)
+  Sampling:            1.0060s ( 0.88%)
+  Token selection:     0.4223s ( 0.37%)
+  Other/Overhead:      0.0355s ( 0.03%)
+================================================================================
+
+Timing statistics saved to: ./outputs/steps16_block16_batch32/timing_stats.json
+
+Generation complete! Decoding outputs...
+GSM8K Exact Match Accuracy: 8.59% (11/128)
