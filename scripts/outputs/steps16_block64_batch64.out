@@ -1,0 +1,50 @@
+Thu Dec 11 21:19:38 2025       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 575.51.03              Driver Version: 575.51.03      CUDA Version: 12.9     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    On  |   00000000:52:00.0 Off |                    0 |
+| N/A   25C    P8             32W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+True
+NVIDIA L40S
+12.1
+Loading model: llada
+Loading LLaDA model: GSAI-ML/LLaDA-8B-Instruct
+Loading tokenizer...
+Loading dataset: gsm8k
+Loading GSM8K dataset (test split)...
+Preparing prompts...
+Tokenizing prompts...
+Starting generation (steps=16, gen_length=128, block_length=64)...
+
+================================================================================
+TIMING BREAKDOWN
+================================================================================
+Total generation time: 80.1128s
+
+Detailed breakdown:
+  Initialization:      0.0255s ( 0.03%)
+  Block setup:         0.0462s ( 0.06%)
+  Model inference:    78.9929s (98.60%)
+  Sampling:            0.6609s ( 0.82%)
+  Token selection:     0.3672s ( 0.46%)
+  Other/Overhead:      0.0201s ( 0.03%)
+================================================================================
+
+Timing statistics saved to: ./outputs/steps16_block64_batch64/timing_stats.json
+
+Generation complete! Decoding outputs...
+GSM8K Exact Match Accuracy: 21.09% (27/128)

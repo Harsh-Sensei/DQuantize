@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=gsm8kval_vanilla_llada_128_steps      # Job name
+#SBATCH --job-name=gsm8ktest_vanilla_llada_128_steps      # Job name
 #SBATCH --nodes=1                      # Number of nodes
 #SBATCH --gres=gpu:1                    # GPUs per node (change if node has >1 GPU)
 #SBATCH --cpus-per-task=8                # CPU cores per task
@@ -10,8 +10,6 @@
 #SBATCH --error=logs/%x_%j.err    # Stderr log
 
 # Activate your conda environment
-# source /home/sreyasv/miniconda3/etc/profile.d/conda.sh
-# conda activate seer
 mkdir -p output
 module load cuda-12.5
 nvidia-smi
@@ -21,4 +19,7 @@ conda activate colab
 
 cd /home/nidhih/isgrl/dquantize/DQuantize/dquantize
 
-python run_llada.py --output_dir='./outputs' --max_length=256 --dataset=gsm8k --max_examples=1319 --batch_size=64
+python run_llada.py --dataset=gsm8k "$@" --max_examples 128 --max_length 256 
+
+#!/bin/bash
+
