@@ -156,7 +156,6 @@ def _generate_single_batch(model, prompt, attention_mask=None, steps=128, gen_le
                         logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
                     else:
                         logits = model(x, attention_mask=attention_mask).logits
-
                 if logits_eos_inf:
                     logits[:, :, 126081] = -torch.inf
                 
@@ -279,7 +278,6 @@ def generate(model, prompt, attention_mask=None, steps=128, gen_length=128, bloc
         # Extract batch
         batch_prompt = prompt[start_idx:end_idx]
         batch_attention_mask = attention_mask[start_idx:end_idx] if attention_mask is not None else None
-        
         # Generate for this batch
         batch_output, batch_logs, batch_timing_stats = _generate_single_batch(
             model=model,
@@ -478,16 +476,14 @@ def main():
     data = load_dataset_examples(args.dataset, tokenizer, args.max_examples, args.max_length, args.min_length)
     raw_prompts = [d['question'] for d in data]
     targets = [d['target'] for d in data]
-
     # For instruct models, apply chat template
-    print("Preparing prompts...")
     if 'instruct' in LLADA_MODEL_PATHS[args.name].lower():
         messages = [{"role": "user", "content": prompt} for prompt in raw_prompts]
         prompts = [tokenizer.apply_chat_template([message], add_generation_prompt=True, tokenize=False) for message in messages]
     else:
         prompts = raw_prompts
 
-    print("Tokenizing prompts...")
+    print("Tokenizing prompts...abc")
     encoded_outputs = tokenizer(
         prompts,
         add_special_tokens=False,

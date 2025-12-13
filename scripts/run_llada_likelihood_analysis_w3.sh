@@ -6,17 +6,17 @@ OUTPUT_DIR="logs/likelihood_analysis_${DATETIME}"
 
 # Create output directory
 mkdir -p "${OUTPUT_DIR}"
-
+QUANTIZED_MODEL_PATH="/home/scratch/hshah2/dquantize_cache/GSAI-ML/LLaDA-8B-Instruct-AWQ-w3-g128.pt"
 # Run the likelihood analysis script
 echo "Starting LLaDA likelihood analysis..."
 echo "Output directory: ${OUTPUT_DIR}"
 echo "=================================="
 
-CUDA_VISIBLE_DEVICES=3,2 uv run -m dquantize.run_llada_likelihood_analysis \
+CUDA_VISIBLE_DEVICES=0,1 uv run -m dquantize.run_llada_likelihood_analysis \
     --model "GSAI-ML/LLaDA-8B-Instruct" \
-    --quantized_model "/home/scratch/hshah2/dquantize_cache/GSAI-ML/LLaDA-8B-Instruct-w4-g128.pt" \
+    --quantized_model "${QUANTIZED_MODEL_PATH}" \
     --dataset "wikitext2" \
-    --max_examples 8 \
+    --max_examples 32 \
     --min_length 32 \
     --max_length 128 \
     --output_dir "${OUTPUT_DIR}" \

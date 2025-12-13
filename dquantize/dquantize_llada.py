@@ -239,7 +239,6 @@ class DQuantizeModelLLada:
         # Ensure quantized model is on correct device
         print(f"Moving quantized model to {device_quantized}...")
         self.quantized_model = self.quantized_model.to(device_quantized)
-        
         for name, param in self.quantized_model.named_parameters():
             if param.device != torch.device(device_quantized):
                 param.data = param.data.to(device_quantized)
@@ -355,8 +354,6 @@ class DQuantizeModelLLada:
             
             for step_idx in tqdm(range(steps_per_block), desc="Generating steps"):
                 # Determine which model to use
-                torch.cuda.synchronize()
-                start_pre_model_time = time.time()
                 use_quantized = self.selection_fn(step_idx, steps_per_block)
                 model = self.quantized_model if use_quantized else self.precise_model
                 model_device = self.device_quantized if use_quantized else self.device_precise
@@ -368,10 +365,6 @@ class DQuantizeModelLLada:
                 
                 # Model inference
                 mask_index = (x_input == mask_id)
-                torch.cuda.synchronize()
-                print(f"Time taken for pre-model operations: {time.time() - start_pre_model_time} seconds")
-
-                start_model_inference_time = time.time()
                 if cfg_scale > 0.:
                     un_x = x_input.clone()
                     un_x[prompt_index_input] = mask_id
@@ -387,11 +380,7 @@ class DQuantizeModelLLada:
                     logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
                 else:
                     logits = model(x_input, attention_mask=attention_mask_input).logits
-                
-                torch.cuda.synchronize()
-                print(f"Time taken for model inference: {time.time() - start_model_inference_time} seconds")
-                
-                start_sampling_time = time.time()
+            
                 if logits_eos_inf:
                     logits[:, :, 126081] = -torch.inf
                 
@@ -412,20 +401,19 @@ class DQuantizeModelLLada:
                 
                 x0 = torch.where(mask_index, x0, x_input)
                 confidence = torch.where(mask_index, x0_p, -np.inf)
-                torch.cuda.synchronize()
-                print(f"Time taken for sampling: {time.time() - start_sampling_time} seconds")
                 
                 
                 # Token selection (low confidence remasking)
-                start_topk_time = time.time()
                 transfer_index = torch.zeros_like(x0, dtype=torch.bool, device=x0.device)
                 if torch.all(num_transfer_tokens[:, step_idx] == num_transfer_tokens[0, step_idx]):
-                    print("Using vectorized topk")
                     _, select_index = torch.topk(
                         confidence,  dim=-1,
                         k=num_transfer_tokens[0, step_idx] + 1
                     )
-                    transfer_index[:, select_index[:,:-1]] = True
+                    # Use scatter_ for correct per-row indexing
+                    # [:, 2D_tensor] applies ALL indices to ALL rows (wrong!)
+                    # scatter_ correctly maps row i of select_index to row i of transfer_index
+                    transfer_index.scatter_(1, select_index[:, :-1], True)
                 else:
                     print("Using looped topk")
                     for j in range(confidence.shape[0]):
@@ -434,13 +422,9 @@ class DQuantizeModelLLada:
                             k=num_transfer_tokens[j, step_idx] + 1
                         )
                         transfer_index[j, select_index[:-1]] = True
-                torch.cuda.synchronize()
-                print(f"Time taken for topk: {time.time() - start_topk_time} seconds")
                 # Move results back to precise device and update x
                 x_input[transfer_index] = x0[transfer_index]
                 x = x_input.to(self.device_precise)
-                torch.cuda.synchronize()
-                print(f"Total time taken for step {step_idx} of block {num_block}: {time.time() - start_pre_model_time} seconds")
         return x
     
     def generate(
@@ -481,7 +465,6 @@ class DQuantizeModelLLada:
             start_idx = batch_idx * batch_size
             end_idx = min(start_idx + batch_size, len(formatted_prompts))
             batch_prompts = formatted_prompts[start_idx:end_idx]
-            
             # Tokenize
             encoded = self.tokenizer(
                 batch_prompts,

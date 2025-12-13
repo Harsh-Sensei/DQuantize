@@ -169,7 +169,7 @@ def main():
                         help='Output directory to save results and config')
     
     args = parser.parse_args()
-    
+
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     plots_dir = os.path.join(args.output_dir, 'plots')
@@ -270,7 +270,7 @@ def main():
         )
         results['firstk'][k] = accuracy
         print(f"firstk k={k}: accuracy={accuracy:.4f}" if accuracy is not None else f"firstk k={k}: accuracy=None")
-    
+        
     # Run experiments for lastk
     print("\n" + "="*80)
     print("RUNNING LASTK EXPERIMENTS")
