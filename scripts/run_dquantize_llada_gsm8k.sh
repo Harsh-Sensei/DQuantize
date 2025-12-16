@@ -6,10 +6,10 @@ OUTPUT_DIR="logs/${DATETIME}"
 mkdir -p "${OUTPUT_DIR}"
 
 # Default quantized model path - update this to your actual path
-QUANTIZED_MODEL_PATH="/home/scratch/hshah2/dquantize_cache/GSAI-ML/LLaDA-8B-Instruct-w4-g128.pt"
+QUANTIZED_MODEL_PATH="/home/scratch/hshah2/dquantize_cache/GSAI-ML/LLaDA-8B-Instruct-AWQ-w4-g128.pt"
 
 # Run the Python script with dquantize arguments
-CUDA_VISIBLE_DEVICES=3,2 uv run -m dquantize.run_dquantize_llada \
+CUDA_VISIBLE_DEVICES=0,1 uv run -m dquantize.run_dquantize_llada \
     --model_name "GSAI-ML/LLaDA-8B-Instruct" \
     --quantized_model_path "${QUANTIZED_MODEL_PATH}" \
     --strategy "firstk" \
@@ -17,14 +17,14 @@ CUDA_VISIBLE_DEVICES=3,2 uv run -m dquantize.run_dquantize_llada \
     --device_precise "cuda:0" \
     --device_quantized "cuda:1" \
     --dataset "gsm8k" \
-    --q_backend "fake" \
+    --q_backend "real" \
     --max_examples 8 \
     --min_length 32 \
     --max_length 256 \
     --split "test" \
     --output_dir "${OUTPUT_DIR}" \
     --steps 64 \
-    --gen_length 256 \
+    --gen_length 128 \
     --block_length 32 \
     --temperature 0. \
     --cfg_scale 0. \

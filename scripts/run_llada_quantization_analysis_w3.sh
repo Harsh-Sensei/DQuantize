@@ -27,6 +27,7 @@ CUDA_VISIBLE_DEVICES=0,1 uv run -m dquantize.run_llada_quantization_analysis \
     --temperature 0. \
     --cfg_scale 0. \
     --remasking "low_confidence" \
+    --q_backend "fake" \
     --batch_size 32 | tee "${OUTPUT_DIR}/run_log.txt"
 
 echo "=================================="
